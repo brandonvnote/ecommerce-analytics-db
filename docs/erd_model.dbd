@@ -1,0 +1,55 @@
+// Customers
+Table Customers {
+  customer_id int [pk, increment]
+  first_name varchar(50)
+  last_name varchar(50)
+  email varchar(100) [unique]
+  created_at timestamp
+}
+
+// Products
+Table Products {
+  product_id int [pk, increment]
+  name varchar(100)
+  category varchar(50)
+  price decimal(10,2)
+  created_at timestamp
+}
+
+// Orders
+Table Orders {
+  order_id int [pk, increment]
+  customer_id int [ref: > Customers.customer_id]
+  order_date timestamp
+  status varchar(20)
+}
+
+// Order_Items
+Table Order_Items {
+  order_id int [ref: > Orders.order_id]
+  product_id int [ref: > Products.product_id]
+  quantity int
+  Indexes {
+    (order_id, product_id) [pk]
+  }
+}
+
+// Reviews
+Table Reviews {
+  review_id int [pk, increment]
+  customer_id int [ref: > Customers.customer_id]
+  product_id int [ref: > Products.product_id]
+  rating int
+  comment text
+  review_date timestamp
+}
+
+// Shipments
+Table Shipments {
+  shipment_id int [pk, increment]
+  order_id int [ref: > Orders.order_id]
+  shipped_date timestamp
+  delivery_date timestamp
+  shipping_method varchar(50)
+  status varchar(20)
+}
