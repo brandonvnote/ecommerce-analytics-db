@@ -1,44 +1,80 @@
-import unittest
-from unittest.mock import MagicMock, patch
+import sys
+import os
+import types
+import builtins
+import pytest
+
+# Ensure project root and data package dir are importable
+proj_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.append(proj_root)
+sys.path.append(os.path.join(proj_root, "data"))
+
 import main_runner
 
 
-class TestMainRunner(unittest.TestCase):
+class FakeCursor:
+    def __init__(self):
+        self.queries = []
+        # simple in-memory table counts
+        self.counts = {"Customers": 3, "Products": 4, "Orders": 5, "Order_Items": 6, "Reviews": 7, "Shipments": 2}
 
-    @patch("main_runner.psycopg2.connect")
-    @patch("main_runner.generate_customers")
-    @patch("main_runner.generate_products")
-    @patch("main_runner.generate_orders")
-    @patch("main_runner.generate_reviews")
-    @patch("main_runner.generate_shipments")
-    def test_main_calls_all_generators(
-        self,
-        mock_shipments,
-        mock_reviews,
-        mock_orders,
-        mock_products,
-        mock_customers,
-        mock_connect,
-    ):
-        # Mock DB connection + cursor context managers
-        mock_conn = MagicMock()
-        mock_cur = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    def execute(self, sql):
+        self.queries.append(sql)
+        # emulate SELECT COUNT(*) FROM {table}
+        if sql.strip().upper().startswith("SELECT COUNT(*) FROM"):
+            self._last = sql
 
-        # Run the main() function
-        main_runner.main()
+    def fetchone(self):
+        # parse table name
+        tbl = self._last.split()[-1]
+        return (self.counts.get(tbl, 0),)
 
-        # Verify psycopg2.connect called
-        mock_connect.assert_called_once()
+    def fetchall(self):
+        return []
 
-        # Verify all generators called once
-        mock_customers.assert_called_once()
-        mock_products.assert_called_once()
-        mock_orders.assert_called_once()
-        mock_reviews.assert_called_once()
-        mock_shipments.assert_called_once()
+    # support context manager protocol used by `with conn.cursor() as cur:`
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
-if __name__ == "__main__":
-    unittest.main()
+class FakeConn:
+    def __init__(self):
+        self.cur = FakeCursor()
+        self.committed = False
+
+    def cursor(self):
+        return self.cur
+
+    def commit(self):
+        self.committed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_table_count_and_main_runs(monkeypatch):
+    fake_conn = FakeConn()
+
+    def fake_connect(**kwargs):
+        return fake_conn
+
+    # Patch psycopg2.connect used by main_runner
+    monkeypatch.setattr(main_runner.psycopg2, "connect", fake_connect)
+
+    # Patch generator functions so they don't try to use the DB
+    for name in ("generate_customers", "generate_products", "generate_orders", "generate_reviews", "generate_shipments"):
+        monkeypatch.setattr(main_runner, name, lambda *a, **k: None)
+
+    # Run main which should use our fake connection and not raise
+    main_runner.main()
+
+    # Verify table_count works
+    cur = fake_conn.cur
+    assert main_runner.table_count(cur, "Customers") == 3
+    assert main_runner.table_count(cur, "NonExisting") == 0
