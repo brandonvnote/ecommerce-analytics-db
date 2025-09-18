@@ -133,6 +133,21 @@ JOIN Reviews r ON p.product_id = r.product_id
 GROUP BY p.product_id, p.name
 ORDER BY avg_rating DESC;
 
+-- Recent reviews (30 days)
+SELECT r.review_id, p.name AS product_name,
+       r.rating, r.review_text, r.created_at
+FROM Reviews r
+JOIN Products p ON r.product_id = p.product_id
+WHERE r.created_at >= NOW() - INTERVAL '30 days'
+ORDER BY r.created_at DESC;
 
--- 9. Recent reviews (last 30 days)
--- Useful for customer
+-- Customer lifetime value
+SELECT c.customer_id,
+       c.first_name || ' ' || c.last_name AS customer_name,
+       SUM(oi.quantity * p.price) AS lifetime_value
+FROM Customers c
+JOIN Orders o ON c.customer_id = o.customer_id
+JOIN Order_Items oi ON o.order_id = oi.order_id
+JOIN Products p ON oi.product_id = p.product_id
+GROUP BY c.customer_id, customer_name
+ORDER BY lifetime_value DESC;
