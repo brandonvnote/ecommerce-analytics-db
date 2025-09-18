@@ -122,73 +122,169 @@ def make_shipments(orders: List[Tuple]) -> List[Tuple[int, datetime, datetime, s
     return shipments
 
 
-def insert_customer_batch(cur, customers: Iterable[Tuple[str, str, str]], chunk_size: int = 100):
+def insert_customer_batch(cur, customers: Iterable[Tuple[str, str, str]], chunk_size: int = 100, report: dict | None = None):
     sql = "INSERT INTO Customers (first_name, last_name, email) VALUES %s"
+    count = 0
     for chunk in chunked_iterable(customers, size=chunk_size):
         execute_values(cur, sql, chunk)
+        count += len(chunk)
+    if report is not None:
+        report.setdefault("customers", 0)
+        report["customers"] += count
 
 
-def insert_product_batch(cur, products: Iterable[Tuple[str, str, float]], chunk_size: int = 100):
+def insert_product_batch(cur, products: Iterable[Tuple[str, str, float]], chunk_size: int = 100, report: dict | None = None):
     sql = "INSERT INTO Products (name, category, price) VALUES %s"
+    count = 0
     for chunk in chunked_iterable(products, size=chunk_size):
         execute_values(cur, sql, chunk)
+        count += len(chunk)
+    if report is not None:
+        report.setdefault("products", 0)
+        report["products"] += count
 
 
-def insert_order_batch(cur, orders: Iterable[Tuple], chunk_size: int = 100) -> List[int]:
+def insert_order_batch(cur, orders: Iterable[Tuple], chunk_size: int = 100, report: dict | None = None) -> List[int]:
     sql = "INSERT INTO Orders (customer_id, order_date, status) VALUES %s RETURNING order_id"
     ids = []
+    count = 0
     for chunk in chunked_iterable(orders, size=chunk_size):
         execute_values(cur, sql, chunk)
         # caller (tests) may have mocked cur.fetchall to return rows
         rows = cur.fetchall()
         ids.extend([r[0] for r in rows])
+        count += len(chunk)
+    if report is not None:
+        report.setdefault("orders", 0)
+        report["orders"] += count
     return ids
 
 
-def insert_order_item_batch(cur, items: Iterable[Tuple[int, int, int]], chunk_size: int = 100):
+def insert_order_item_batch(cur, items: Iterable[Tuple[int, int, int]], chunk_size: int = 100, report: dict | None = None):
+    # Aggregate duplicate (order_id, product_id) pairs by summing quantities
+    agg = {}
+    for oid, pid, qty in items:
+        key = (oid, pid)
+        agg[key] = agg.get(key, 0) + qty
+
     sql = "INSERT INTO Order_Items (order_id, product_id, quantity) VALUES %s"
-    for chunk in chunked_iterable(items, size=chunk_size):
+    count = 0
+    # convert aggregated dict into tuples
+    deduped = [(oid, pid, qty) for (oid, pid), qty in agg.items()]
+    for chunk in chunked_iterable(deduped, size=chunk_size):
         execute_values(cur, sql, chunk)
+        count += len(chunk)
+    if report is not None:
+        report.setdefault("order_items", 0)
+        report["order_items"] += count
 
 
-def insert_review_batch(cur, reviews: Iterable[Tuple[int, int, int, str]], chunk_size: int = 100):
+def insert_review_batch(cur, reviews: Iterable[Tuple[int, int, int, str]], chunk_size: int = 100, report: dict | None = None):
     sql = "INSERT INTO Reviews (customer_id, product_id, rating, comment) VALUES %s"
+    count = 0
     for chunk in chunked_iterable(reviews, size=chunk_size):
         execute_values(cur, sql, chunk)
+        count += len(chunk)
+    if report is not None:
+        report.setdefault("reviews", 0)
+        report["reviews"] += count
 
 
-def insert_shipment_batch(cur, shipments: Iterable[Tuple], chunk_size: int = 100):
-    sql = "INSERT INTO Shipments (order_id, shipped_date, delivery_date, carrier, status) VALUES %s"
+def insert_shipment_batch(cur, shipments: Iterable[Tuple], chunk_size: int = 100, report: dict | None = None):
+    # use shipping_method to match the schema's column name
+    sql = "INSERT INTO Shipments (order_id, shipped_date, delivery_date, shipping_method, status) VALUES %s"
+    count = 0
     for chunk in chunked_iterable(shipments, size=chunk_size):
         execute_values(cur, sql, chunk)
+        count += len(chunk)
+    if report is not None:
+        report.setdefault("shipments", 0)
+        report["shipments"] += count
 
 
-def generate_customers(cur, n: int = 50):
+def generate_customers(cur, n: int = 50, report: dict | None = None, chunk_size: int = 100):
     """Generate customers and insert them using insert_customer_batch."""
     customers = make_customers(n)
-    insert_customer_batch(cur, customers)
+    insert_customer_batch(cur, customers, report=report, chunk_size=chunk_size)
 
 
-def generate_products(cur, n: int = 30):
+def generate_products(cur, n: int = 30, report: dict | None = None, chunk_size: int = 100):
     """Generate products and insert them using insert_product_batch."""
     products = make_products(n)
-    insert_product_batch(cur, products)
+    insert_product_batch(cur, products, report=report, chunk_size=chunk_size)
 
 
-def generate_orders(cur, n: int = 100, num_customers: int = 50):
+def generate_orders(cur, n: int = 100, num_customers: int = 50, report: dict | None = None, chunk_size: int = 100):
     """Generate orders and insert using insert_order_batch."""
-    # build simple order tuples (customer_id, order_date, status)
-    customer_ids = list(range(1, num_customers + 1))
-    orders, _ = make_orders_and_items(customer_ids, list(range(1, 11)), n=n)
-    insert_order_batch(cur, orders)
+    # Prefer using actual customer IDs from the database if a cursor is available
+    customer_ids = None
+    try:
+        # Attempt to read existing customer ids from the Customers table
+        cur.execute("SELECT customer_id FROM Customers")
+        rows = cur.fetchall()
+        if rows:
+            customer_ids = [r[0] for r in rows]
+    except Exception:
+        # If querying fails (no DB or table), fall back to the numeric range
+        customer_ids = None
+
+    if not customer_ids:
+        customer_ids = list(range(1, num_customers + 1))
+
+    # Attempt to use actual product ids from the DB to ensure FK validity for order items
+    product_ids = None
+    try:
+        cur.execute("SELECT product_id FROM Products")
+        prow = cur.fetchall()
+        if prow:
+            product_ids = [r[0] for r in prow]
+    except Exception:
+        product_ids = None
+
+    if not product_ids:
+        product_ids = list(range(1, 11))
+
+    orders, build_items = make_orders_and_items(customer_ids, product_ids, n=n)
+    # insert orders and get back created order ids (insert_order_batch uses cur.fetchall())
+    order_ids = insert_order_batch(cur, orders, report=report, chunk_size=chunk_size)
+
+    # build and insert order items tied to the inserted order ids
+    if order_ids:
+        items = build_items(order_ids)
+        if items:
+            insert_order_item_batch(cur, items, report=report, chunk_size=chunk_size)
 
 
-def generate_reviews(cur, n: int = 100, num_customers: int = 50, num_products: int = 30):
-    reviews = make_reviews(list(range(1, num_customers + 1)), list(range(1, num_products + 1)), n=n)
-    insert_review_batch(cur, reviews)
+def generate_reviews(cur, n: int = 100, num_customers: int = 50, num_products: int = 30, report: dict | None = None, chunk_size: int = 100):
+    # Try to use actual customer and product ids from the DB when available
+    customer_ids = None
+    product_ids = None
+    try:
+        cur.execute("SELECT customer_id FROM Customers")
+        rows = cur.fetchall()
+        if rows:
+            customer_ids = [r[0] for r in rows]
+    except Exception:
+        customer_ids = None
+
+    try:
+        cur.execute("SELECT product_id FROM Products")
+        rows = cur.fetchall()
+        if rows:
+            product_ids = [r[0] for r in rows]
+    except Exception:
+        product_ids = None
+
+    if not customer_ids:
+        customer_ids = list(range(1, num_customers + 1))
+    if not product_ids:
+        product_ids = list(range(1, num_products + 1))
+
+    reviews = make_reviews(customer_ids, product_ids, n=n)
+    insert_review_batch(cur, reviews, report=report, chunk_size=chunk_size)
 
 
-def generate_shipments(cur):
+def generate_shipments(cur, report: dict | None = None, n: int = 100, chunk_size: int = 100):
     """Query orders and generate shipments for shipped/delivered orders, then insert via insert_shipment_batch.
     If there are no orders returned, do nothing (tests expect insert_shipment_batch not to be called).
     """
@@ -198,4 +294,7 @@ def generate_shipments(cur):
         return
     shipments = make_shipments(orders)
     if shipments:
-        insert_shipment_batch(cur, shipments)
+        # optionally limit number of shipments generated when 'n' provided
+        if n is not None:
+            shipments = shipments[:n]
+        insert_shipment_batch(cur, shipments, report=report, chunk_size=chunk_size)
