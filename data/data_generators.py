@@ -94,11 +94,15 @@ def make_orders_and_items(customer_ids: List[int], product_ids: List[int], n: in
         orders.append((cid, order_date, status))
 
     def build_items(order_ids: List[int]):
-        return [
-            (oid, random.choice(product_ids), random.randint(1, 5))
-            for oid in order_ids
-            for _ in range(random.randint(1, 4))
-        ]
+        items = []
+        for oid in order_ids:
+            # choose between 1 and up to 4 unique products per order
+            max_items = min(4, len(product_ids))
+            k = random.randint(1, max_items)
+            chosen = random.sample(product_ids, k)
+            for pid in chosen:
+                items.append((oid, pid, random.randint(1, 5)))
+        return items
 
     return orders, build_items
 

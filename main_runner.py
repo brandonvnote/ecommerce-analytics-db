@@ -2,7 +2,7 @@ import os
 import psycopg2
 from dotenv import load_dotenv
 
-from data_generators import (
+from data.data_generators import (
     generate_customers,
     generate_products,
     generate_orders,
