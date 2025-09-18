@@ -5,3 +5,18 @@ settings.json
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Environment files
+.env
+.env.*
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
