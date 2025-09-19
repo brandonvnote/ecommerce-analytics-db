@@ -38,11 +38,6 @@ def test_make_products_basic():
         assert isinstance(created, datetime)
 
 
-def test_chunked_iterable():
-    it = range(7)
-    chunks = list(dg.chunked_iterable(it, size=3))
-    assert [len(c) for c in chunks] == [3, 3, 1]
-
 
 def test_make_orders_and_items_build():
     customer_ids = [1, 2, 3]
@@ -109,7 +104,7 @@ def test_execute_values_fallback_and_insert_batch_returns_ids():
 
     cur = FakeCursor()
     rows = [(1, "2025-01-01", "pending"), (2, "2025-01-02", "shipped")]
-    ids = dg.insert_batch(cur, "orders", rows, chunk_size=100, return_ids=True)
+    ids = dg.insert_batch(cur, "orders", rows, return_ids=True)
     assert ids == [201, 202]
     assert cur.executed
 

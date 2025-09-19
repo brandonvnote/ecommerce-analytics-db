@@ -67,6 +67,9 @@ def test_table_count_and_main_runs(monkeypatch):
     # Patch psycopg2.connect used by main_runner
     monkeypatch.setattr(main_runner.psycopg2, "connect", fake_connect)
 
+    # Patch input so prompts return 'n' and main() doesn't block
+    monkeypatch.setattr('builtins.input', lambda *a, **k: 'n')
+
     # Patch generator functions so they don't try to use the DB
     for name in ("generate_customers", "generate_products", "generate_orders", "generate_reviews", "generate_shipments"):
         monkeypatch.setattr(main_runner, name, lambda *a, **k: None)

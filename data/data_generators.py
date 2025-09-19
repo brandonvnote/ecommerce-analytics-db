@@ -1,11 +1,13 @@
 # File: data_generators.py
 # Purpose: Pure data generation and insertion helpers for an e-commerce database.
-# All SQL statements (INSERT/SELECT) are centralized in template registries for maintainability.
+# Relies on SQL templates centralized in templates.py for maintainability.
 
 import random
 from faker import Faker
 from datetime import timedelta
 from typing import List, Tuple, Dict, Optional
+
+import data.templates as templates
 
 fake = Faker()
 
@@ -13,48 +15,6 @@ try:
     from psycopg2.extras import execute_values as _psycopg2_execute_values
 except Exception:
     _psycopg2_execute_values = None
-
-
-# ---------------- SQL Template Registry ----------------
-
-def get_sql_template(key: str) -> str:
-    """
-    Retrieve an INSERT SQL template by key.
-
-    Args:
-        key (str): Identifier for the SQL template.
-
-    Returns:
-        str: SQL INSERT template string.
-    """
-    templates = {
-        "customers": "INSERT INTO Customers (first_name, last_name, email, created_at) VALUES %s",
-        "products": "INSERT INTO Products (name, category, price, created_at) VALUES %s",
-        "orders": "INSERT INTO Orders (customer_id, order_date, status) VALUES %s RETURNING order_id",
-        "order_items": "INSERT INTO Order_Items (order_id, product_id, quantity) VALUES %s",
-        "reviews": "INSERT INTO Reviews (customer_id, product_id, rating, comment, review_date) VALUES %s",
-        "shipments": "INSERT INTO Shipments (order_id, shipped_date, delivery_date, shipping_method, status) VALUES %s",
-    }
-    return templates[key]
-
-
-def get_sql_select(key: str) -> str:
-    """
-    Retrieve a SELECT SQL template by key.
-
-    Args:
-        key (str): Identifier for the SQL template.
-
-    Returns:
-        str: SQL SELECT template string.
-    """
-    templates = {
-        "select_customers": "SELECT customer_id FROM Customers",
-        "select_products": "SELECT product_id FROM Products",
-        "select_orders": "SELECT order_id FROM Orders",
-        "select_orders_info": "SELECT order_id, order_date, status FROM Orders",
-    }
-    return templates[key]
 
 
 # ---------------- Execution Helpers ----------------
@@ -67,6 +27,9 @@ def execute_values(cur, sql: str, argslist: List[tuple]):
         cur: Database cursor.
         sql (str): SQL INSERT template.
         argslist (List[tuple]): Rows to insert.
+
+    Returns:
+        Any: Result of the execution depending on driver used.
     """
     if _psycopg2_execute_values:
         return _psycopg2_execute_values(cur, sql, argslist)
@@ -86,23 +49,26 @@ def curate_ids(cur, cache: Optional[Dict[str, List[int]]] = None) -> Dict[str, L
 
     Returns:
         Dict[str, List[int]]: Dictionary of IDs for customers, products, and orders.
+
+    Raises:
+        RuntimeError: If customers or products are missing.
     """
     if cache is not None and all(cache.values()):
         return cache
 
     ids: Dict[str, List[int]] = {"customers": [], "products": [], "orders": []}
 
-    cur.execute(get_sql_select("select_customers"))
+    cur.execute(templates.get_sql_select("select_customers"))
     ids["customers"] = [r[0] for r in cur.fetchall()]
     if not ids["customers"]:
         raise RuntimeError("No customers found. Customers must be generated first.")
 
-    cur.execute(get_sql_select("select_products"))
+    cur.execute(templates.get_sql_select("select_products"))
     ids["products"] = [r[0] for r in cur.fetchall()]
     if not ids["products"]:
         raise RuntimeError("No products found. Products must be generated first.")
 
-    cur.execute(get_sql_select("select_orders"))
+    cur.execute(templates.get_sql_select("select_orders"))
     ids["orders"] = [r[0] for r in cur.fetchall()]
 
     return ids
@@ -122,11 +88,11 @@ def curate_orders_info(cur, order_ids: Optional[List[int]] = None) -> List[Tuple
     if order_ids:
         placeholders = ",".join(["%s"] * len(order_ids))
         cur.execute(
-            f"{get_sql_select('select_orders_info')} WHERE order_id IN ({placeholders})",
+            f"{templates.get_sql_select('select_orders_info')} WHERE order_id IN ({placeholders})",
             order_ids,
         )
     else:
-        cur.execute(get_sql_select("select_orders_info"))
+        cur.execute(templates.get_sql_select("select_orders_info"))
     return cur.fetchall() or []
 
 
@@ -191,7 +157,7 @@ def make_products(n: int) -> list[tuple]:
             )
         )
     return products
-  
+
 
 def make_orders_and_items(customer_ids: List[int], product_ids: List[int], n: int):
     """
@@ -312,7 +278,7 @@ def insert_batch(cur, sql_key: str, rows: list[tuple], return_ids: bool = False)
     if not rows:
         return [] if return_ids else None
 
-    sql = get_sql_template(sql_key)
+    sql = templates.get_sql_template(sql_key)
     execute_values(cur, sql, rows)
     if return_ids:
         return [r[0] for r in cur.fetchall()]
@@ -355,6 +321,9 @@ def generate_orders(cur, customer_ids: List[int], product_ids: List[int], n: int
 
     Returns:
         List[int]: Generated order IDs.
+
+    Raises:
+        RuntimeError: If customers or products are missing.
     """
     if not customer_ids:
         raise RuntimeError("Cannot generate orders: no customers available.")
@@ -376,6 +345,9 @@ def generate_reviews(cur, customer_ids: List[int], product_ids: List[int], n: in
         customer_ids (List[int]): Existing customer IDs.
         product_ids (List[int]): Existing product IDs.
         n (int): Number of reviews to generate.
+
+    Raises:
+        RuntimeError: If customers or products are missing.
     """
     if not customer_ids:
         raise RuntimeError("Cannot generate reviews: no customers available.")
@@ -392,6 +364,9 @@ def generate_shipments(cur, orders_info: Optional[List[Tuple]] = None, n: int = 
         cur: Database cursor.
         orders_info (Optional[List[Tuple]]): Existing orders with metadata.
         n (int): Limit of shipments to generate (0 = no limit).
+
+    Raises:
+        RuntimeError: If no orders are available.
     """
     if orders_info is None:
         orders_info = curate_orders_info(cur)
