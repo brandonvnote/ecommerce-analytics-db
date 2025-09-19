@@ -68,12 +68,16 @@ def main():
                 n = int(input("How many customers? "))
                 generate_customers(cur, n)
                 print(f"Customers total: {table_count(cur, 'Customers')}")
+            else:
+                return  # Exit script
 
             # Products
             if prompt_yes_no("Generate products?"):
                 n = int(input("How many products? "))
                 generate_products(cur, n)
                 print(f"Products total: {table_count(cur, 'Products')}")
+            else:
+                return
 
             # Orders
             if prompt_yes_no("Generate orders?"):
@@ -82,6 +86,8 @@ def main():
                 generate_orders(cur, ids["customers"], ids["products"], n)
                 print(f"Orders total: {table_count(cur, 'Orders')}")
                 print(f"Order_Items total: {table_count(cur, 'Order_Items')}")
+            else:
+                return
 
             # Reviews
             if prompt_yes_no("Generate reviews?"):
@@ -89,16 +95,19 @@ def main():
                 n = int(input("How many reviews? "))
                 generate_reviews(cur, ids["customers"], ids["products"], n)
                 print(f"Reviews total: {table_count(cur, 'Reviews')}")
+            else:
+                return
 
             # Shipments
             if prompt_yes_no("Generate shipments?"):
                 n = int(input("How many shipments? "))
                 generate_shipments(cur, n=n)
                 print(f"Shipments total: {table_count(cur, 'Shipments')}")
+            else:
+                return
 
         conn.commit()
         print("\nData generation complete.")
-
 
 if __name__ == "__main__":
     main()
